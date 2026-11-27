@@ -105,6 +105,19 @@ retirement rules.
 - Please report vulnerabilities privately as described in
   [`SECURITY.md`](SECURITY.md).
 
+## Tests
+
+```bash
+npm run check   # syntax check of the runtime modules
+npm test        # Node test runner
+```
+
+The suite covers payments, refunds, OTP delivery, number lifecycle, admin
+actions and localization. Some assertions still describe the previous
+Stars-rate and number-replacement models; they are tracked as known failures
+while the tests are aligned with the current production behaviour. Database
+tests skip automatically when PostgreSQL is not reachable.
+
 ## Contributing
 
 1. Fork the repository.
