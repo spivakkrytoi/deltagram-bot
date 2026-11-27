@@ -61,6 +61,9 @@ export function loadConfig() {
     gramsrvToken: required("GRAMSRV_TOKEN"),
     gramsrvActor: (process.env.GRAMSRV_ACTOR ?? "deltagram-store").trim(),
     publicBaseURL: (process.env.PUBLIC_BASE_URL ?? "https://example.com").replace(/\/+$/, ""),
+    // "Скачать" button target. Empty value keeps it a callback that shows the
+    // download page from publicBaseURL instead of an external URL button.
+    downloadUrl: (process.env.DOWNLOAD_URL || "https://dltagram.duckdns.org").trim().replace(/\/+$/, ""),
     dbUrl: databaseURL(),
     botMode: mode,
     codeHost: (process.env.CODE_HTTP_HOST ?? "0.0.0.0").trim(),

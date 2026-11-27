@@ -1,7 +1,9 @@
 import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { randomInt, randomBytes } from "node:crypto";
 import { buildPayload, catalog, findProduct, KINDS, localizeProduct, normalizeUsername, parsePayload, productsOfKind } from "./catalog.js";
+import { stripCustomEmoji, stripMarkupEmoji } from "./emoji.js";
 import { normalizeLanguage, translate, translateError } from "./i18n.js";
+import { mainMenuKeyboard, mainMenuText } from "./menu.js";
 import { isRandomMode, isRealMode, rejectRandomInRealMode } from "./real-number.js";
 import { createProxyAgent, describeProxy } from "./proxy.js";
 import {
@@ -196,13 +198,8 @@ export async function runNumberRetention({ db, gramsrv, log = console }) {
   return owners.length;
 }
 
-export function mainKeyboard(language, admin = false) {
-  const kb = new InlineKeyboard()
-    .text(translate(language, "buttonNumbers"), "menu:numbers").text(translate(language, "buttonShop"), "menu:shop").row()
-    .text(translate(language, "buttonReferrals"), "menu:referrals").row()
-    .text(translate(language, "buttonSupport"), "menu:support").text(translate(language, "buttonSettings"), "menu:settings");
-  if (admin) kb.row().text(translate(language, "buttonAdmin"), "admin:menu");
-  return kb;
+export function mainKeyboard(language, admin = false, options = {}) {
+  return mainMenuKeyboard(language, { admin, ...options });
 }
 
 export function backKeyboard(language, target = "menu:home") {
@@ -287,14 +284,33 @@ export function commandList(language) {
   ];
 }
 
+function isCustomEmojiError(error) {
+  const text = String(error?.description ?? error?.message ?? error ?? "");
+  return /custom emoji/i.test(text) || /CUSTOM_EMOJI/.test(text);
+}
+
+async function replyWithEmojiFallback(ctx, message, options) {
+  try {
+    return await ctx.reply(message, options);
+  } catch (error) {
+    if (!isCustomEmojiError(error)) throw error;
+    // The bot cannot use custom emoji (no Fragment username and the owner has
+    // no Premium): resend the same menu with plain emoji.
+    return ctx.reply(stripCustomEmoji(message), { ...options, reply_markup: stripMarkupEmoji(options?.reply_markup) });
+  }
+}
+
 async function editOrReply(ctx, message, keyboard = undefined) {
   const options = { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: keyboard };
   if (ctx.callbackQuery?.message) {
     try { return await ctx.editMessageText(message, options); }
-    catch (error) { if (!String(error.description ?? error).includes("message is not modified")) throw error; }
+    catch (error) {
+      if (isCustomEmojiError(error)) return editOrReply(ctx, stripCustomEmoji(message), stripMarkupEmoji(keyboard));
+      if (!String(error.description ?? error).includes("message is not modified")) throw error;
+    }
     return;
   }
-  return ctx.reply(message, options);
+  return replyWithEmojiFallback(ctx, message, options);
 }
 
 async function subscribed(ctx, config) {
@@ -567,8 +583,8 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
       if (number) lines.push(tr(ctx.from.id, "startPhone", { phone: escapeHTML(number.display) }));
       else lines.push(tr(ctx.from.id, "chooseInitialCountry"));
       if (referralApplied) lines.push(tr(ctx.from.id, "referralAccepted"));
-      const replyMarkup = number ? mainKeyboard(language, isOwner(config, ctx.from.id)) : countryKeyboard(language, "menu:home");
-      await ctx.reply(lines.join("\n\n"), { parse_mode: "HTML", reply_markup: replyMarkup });
+      const replyMarkup = number ? mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }) : countryKeyboard(language, "menu:home");
+      await replyWithEmojiFallback(ctx, lines.join("\n\n"), { parse_mode: "HTML", reply_markup: replyMarkup });
     } else {
       const bound = await db.verifiedPhone(ctx.from.id);
       const lines = [tr(ctx.from.id, "startHello")];
@@ -577,7 +593,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
       }
       const referralApplied = !existed && referrer > 0 && (await db.user(ctx.from.id))?.referred_by === referrer;
       if (referralApplied) lines.push(tr(ctx.from.id, "referralAccepted"));
-      await ctx.reply(lines.join("\n\n"), { parse_mode: "HTML", reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id)) });
+      await replyWithEmojiFallback(ctx, lines.join("\n\n"), { parse_mode: "HTML", reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }) });
     }
   });
 
@@ -780,7 +796,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
   bot.callbackQuery(/^subscription:check$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const language = languageOf(ctx.from.id);
-    if (await subscribed(ctx, config)) await editOrReply(ctx, tr(ctx.from.id, "menuTitle"), mainKeyboard(language, isOwner(config, ctx.from.id)));
+    if (await subscribed(ctx, config)) await editOrReply(ctx, mainMenuText(language), mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }));
     else await subscriptionGate(ctx, config, language);
   });
 
@@ -790,7 +806,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
     const user = await db.user(ctx.from.id);
     db._userCache.set(ctx.from.id, user);
     const language = languageOf(ctx.from.id);
-    if (page === "home") return editOrReply(ctx, tr(ctx.from.id, "menuTitle"), mainKeyboard(language, isOwner(config, ctx.from.id)));
+    if (page === "home") return editOrReply(ctx, mainMenuText(language), mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }));
     if (page === "numbers") return numbersMenu(ctx);
     if (page === "shop") return editOrReply(ctx, tr(ctx.from.id, "shopTitle"), shopKeyboard(language));
     if (page === "referrals") {
@@ -801,6 +817,50 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
     if (page === "support") {
       await db.setPending(ctx.from.id, "support");
       return editOrReply(ctx, tr(ctx.from.id, "supportPrompt"), backKeyboard(language));
+    }
+    if (page === "profile") {
+      const phone = await db.verifiedPhone(ctx.from.id);
+      const serverID = Number(user?.server_user_id);
+      const lines = [
+        tr(ctx.from.id, "profileTitle"),
+        "",
+        Number.isSafeInteger(serverID) && serverID > 0
+          ? tr(ctx.from.id, "profileID", { id: serverID })
+          : tr(ctx.from.id, "profileNoID"),
+        phone ? tr(ctx.from.id, "profilePhone", { phone: escapeHTML(phone.phone) }) : tr(ctx.from.id, "profileNoPhone"),
+        user?.username ? tr(ctx.from.id, "profileUsername", { username: escapeHTML(user.username) }) : null,
+        tr(ctx.from.id, "profileBalance", { balance: user?.bonus ?? 0 }),
+        tr(ctx.from.id, "profileLanguage", { language: tr(ctx.from.id, user?.language === "en" ? "languageNameEn" : "languageNameRu") }),
+      ].filter(Boolean);
+      const kb = new InlineKeyboard()
+        .text(tr(ctx.from.id, "buttonReferrals"), "menu:referrals").text(tr(ctx.from.id, "buttonSupport"), "menu:support").row()
+        .text(tr(ctx.from.id, "buttonSettings"), "menu:settings").row()
+        .text(tr(ctx.from.id, "back"), "menu:home");
+      return editOrReply(ctx, lines.join("\n"), kb);
+    }
+    if (page === "daily") {
+      const result = await db.claimDaily(ctx.from.id, config.dailyBonus);
+      return editOrReply(
+        ctx,
+        result.claimed
+          ? tr(ctx.from.id, "dailyClaimed", { amount: config.dailyBonus, balance: result.balance })
+          : tr(ctx.from.id, "dailyAlreadyClaimed", { balance: result.balance }),
+        backKeyboard(language),
+      );
+    }
+    if (page === "download") {
+      const kb = new InlineKeyboard()
+        .url(tr(ctx.from.id, "downloadButton"), config.downloadUrl).row()
+        .text(tr(ctx.from.id, "back"), "menu:home");
+      return editOrReply(ctx, tr(ctx.from.id, "downloadText"), kb);
+    }
+    if (page === "about") {
+      const support = config.publicUsername ? `@${config.publicUsername}` : config.publicBaseURL;
+      const text = `${tr(ctx.from.id, "aboutTitle")}\n\n${tr(ctx.from.id, "aboutText", { support: escapeHTML(support) })}`;
+      const kb = new InlineKeyboard()
+        .text(tr(ctx.from.id, "buttonSupport"), "menu:support").row()
+        .text(tr(ctx.from.id, "back"), "menu:home");
+      return editOrReply(ctx, text, kb);
     }
     if (page === "settings") return editOrReply(ctx, tr(ctx.from.id, "settingsTitle"), settingsKeyboard(language, user, config));
   });
@@ -964,7 +1024,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
       db._userCache.set(ctx.from.id, await db.user(ctx.from.id));
       const message = tr(ctx.from.id, "accountSaved", { id: serverUserID });
       await ctx.answerCallbackQuery({ text: message });
-      return editOrReply(ctx, tr(ctx.from.id, "menuTitle"), mainKeyboard(language, isOwner(config, ctx.from.id)));
+      return editOrReply(ctx, mainMenuText(language), mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }));
     } catch (error) {
       console.error("Account fetch failed", error);
       const text = String(error?.message ?? "").startsWith("gramsrv ")
@@ -1007,7 +1067,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
       const bound = await db.bindVerifiedPhone(ctx.from.id, ctx.chat.id, ctx.message.contact.phone_number);
       const sent = await ctx.reply(tr(ctx.from.id, "phoneBound", { phone: escapeHTML(bound.phone) }), { parse_mode: "HTML" });
       deleteAfter(ctx.chat.id, sent.message_id);
-      return ctx.reply(tr(ctx.from.id, "menuTitle"), { reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id)) });
+      return replyWithEmojiFallback(ctx, mainMenuText(language), { parse_mode: "HTML", reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }) });
     } catch (error) {
       await ctx.reply(translateError(language, error), { reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id)) });
     }
@@ -1192,7 +1252,7 @@ export function createBot({ config, db, gramsrv, recurring = null }) {
     if (input === translate(language, "phoneCancelButton")) {
       const shareMsgID = phoneShareMessages.get(ctx.chat.id);
       if (shareMsgID) { phoneShareMessages.delete(ctx.chat.id); ctx.api.deleteMessage(ctx.chat.id, shareMsgID).catch(() => {}); }
-      return ctx.reply(tr(ctx.from.id, "menuTitle"), { reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id)) });
+      return replyWithEmojiFallback(ctx, mainMenuText(language), { parse_mode: "HTML", reply_markup: mainKeyboard(language, isOwner(config, ctx.from.id), { downloadUrl: config.downloadUrl }) });
     }
 
     if (isOwner(config, ctx.from.id) && ctx.message.reply_to_message?.from?.id === (bot.botInfo?.id ?? 0)) {
