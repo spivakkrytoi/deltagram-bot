@@ -198,10 +198,12 @@ export async function runNumberRetention({ db, gramsrv, log = console }) {
 
 export function mainKeyboard(language, admin = false) {
   const kb = new InlineKeyboard()
-    .text(translate(language, "buttonNumbers"), "menu:numbers").text(translate(language, "buttonShop"), "menu:shop").row()
-    .text(translate(language, "buttonReferrals"), "menu:referrals").row()
-    .text(translate(language, "buttonSupport"), "menu:support").text(translate(language, "buttonSettings"), "menu:settings");
-  if (admin) kb.row().text(translate(language, "buttonAdmin"), "admin:menu");
+    .text(translate(language, "buttonNumbers"), "menu:numbers").style("primary")
+    .text(translate(language, "buttonShop"), "menu:shop").style("success").row()
+    .text(translate(language, "buttonReferrals"), "menu:referrals").style("primary").row()
+    .text(translate(language, "buttonSupport"), "menu:support").style("danger")
+    .text(translate(language, "buttonSettings"), "menu:settings").style("primary");
+  if (admin) kb.row().text(translate(language, "buttonAdmin"), "admin:menu").style("danger");
   return kb;
 }
 
