@@ -223,8 +223,8 @@ export function shopKeyboard(language, giftLabURL = "") {
   const kb = new InlineKeyboard()
     .text(translate(language, "buttonStars"), "shop:stars").row()
     .text(translate(language, "buttonNumber"), "request:number").text(translate(language, "buttonUsername"), "request:username").row();
-  if (giftLabURL) kb.row().webApp(translate(language, "buttonGiftLab"), giftLabURL);
-  kb.row().text(translate(language, "back"), "menu:home");
+  if (giftLabURL) kb.webApp(translate(language, "buttonGiftLab"), giftLabURL).row();
+  kb.text(translate(language, "back"), "menu:home");
   return kb;
 }
 
