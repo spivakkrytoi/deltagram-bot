@@ -23,6 +23,7 @@ stop DeltaGram itself.
 - compensated refunds (Stars, Premium, usernames, paid numbers);
 - daily bonuses, referrals and a weighted wheel;
 - promo codes and button-based giveaways;
+- owner-only Gift Lab Mini App button in the shop (`GIFTLAB_URL`);
 - support tickets;
 - Russian and English localization;
 - per-user language and notification settings;
